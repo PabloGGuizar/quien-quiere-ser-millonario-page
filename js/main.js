@@ -1,5 +1,7 @@
-import { allAvailableQuestions } from './questions.js';
-import { shuffleArray, showMessageBox } from './helpers.js';
+// js/main.js
+
+// ELIMINAR: import { allAvailableQuestions } from './questions.js';
+import { shuffleArray, showMessageBox, hideMessageBox } from './helpers.js';
 import {
     updatePrizeLadder,
     generatePrizeLadder,
@@ -7,6 +9,9 @@ import {
     markAnswer,
     askPlayerName
 } from './ui.js';
+
+// Lifelines
+import { apply5050, applyCall, applyAudience } from './lifelines.js';
 
 const QUESTIONS_PER_GAME = 12;
 const MAX_GAMES = 5;
@@ -20,7 +25,7 @@ const difficultyMap = {
 
 let playerName = "Jugador";
 let hasPlayerNameBeenSet = false;
-let questions = [];
+let questions = []; // Esto ahora se poblará dinámicamente
 let currentQuestionIndex = 0;
 let score = 0;
 let gamesPlayedCount = 0;
@@ -37,161 +42,120 @@ const restartButton = document.getElementById('restartGameButton');
 const startButton = document.getElementById('startGameButton');
 const prizeLadderElement = document.getElementById('prizeLadder');
 const gameLogoImage = document.getElementById('gameLogoImage');
+const lifeline5050Button = document.getElementById('lifeline5050'); // Añadido
+const lifelineCallButton = document.getElementById('lifelineCall');   // Añadido
+const lifelineAudienceButton = document.getElementById('lifelineAudience'); // Añadido
 
-// Lifelines
-document.getElementById('lifeline5050').onclick = () => {
+// Event Listeners para las Líneas de Vida
+lifeline5050Button.onclick = () => {
     if (!gameStarted || used5050) return;
-    showMessageBox("¿Usar 50:50?", "Eliminará dos opciones incorrectas.", [
-        { text: "Sí", className: "confirm", onClick: apply5050 },
-        { text: "No", className: "cancel" }
-    ]);
-};
-
-document.getElementById('lifelineCall').onclick = () => {
-    if (!gameStarted || usedCall) return;
-    showMessageBox("¿Usar Llamada?", "Recibirás una pista de un amigo.", [
-        { text: "Sí", className: "confirm", onClick: applyCall },
-        { text: "No", className: "cancel" }
-    ]);
-};
-
-document.getElementById('lifelineAudience').onclick = () => {
-    if (!gameStarted || usedAudience) return;
-    showMessageBox("¿Usar Público?", "Verás qué opción prefiere el público.", [
-        { text: "Sí", className: "confirm", onClick: applyAudience },
-        { text: "No", className: "cancel" }
-    ]);
-};
-
-function apply5050() {
+    apply5050(optionsGrid.querySelectorAll('.option-button'), questions[currentQuestionIndex].correct);
     used5050 = true;
-    document.getElementById('lifeline5050').disabled = true;
+    lifeline5050Button.disabled = true;
+};
 
-    const q = questions[currentQuestionIndex];
-    const correct = q.correct;
-    const incorrect = Object.keys(q.options).filter(k => k !== correct);
-    shuffleArray(incorrect);
-    const toHide = incorrect.slice(0, 2);
-
-    optionsGrid.querySelectorAll('.option-button').forEach(btn => {
-        if (toHide.includes(btn.dataset.option)) {
-            btn.disabled = true;
-            btn.style.display = 'none';
-        }
-    });
-}
-
-function applyCall() {
+lifelineCallButton.onclick = () => {
+    if (!gameStarted || usedCall) return;
+    applyCall(questions[currentQuestionIndex]);
     usedCall = true;
-    document.getElementById('lifelineCall').disabled = true;
+    lifelineCallButton.disabled = true;
+};
 
-    const q = questions[currentQuestionIndex];
-    const correctText = q.options[q.correct];
-    showMessageBox("Llamada", `Tu amigo dice: "Creo que es ${q.correct}) ${correctText}."`, [
-        { text: "Gracias", className: "confirm" }
-    ]);
-}
-
-function applyAudience() {
+lifelineAudienceButton.onclick = () => {
+    if (!gameStarted || usedAudience) return;
+    applyAudience(questions[currentQuestionIndex]);
     usedAudience = true;
-    document.getElementById('lifelineAudience').disabled = true;
+    lifelineAudienceButton.disabled = true;
+};
 
-    const q = questions[currentQuestionIndex];
-    const correct = q.correct;
-    const options = Object.keys(q.options);
-    const votes = {};
-    let remaining = 100;
-
-    const correctVotes = Math.floor(Math.random() * 31) + 40; // 40–70%
-    votes[correct] = correctVotes;
-    remaining -= correctVotes;
-
-    const incorrect = options.filter(k => k !== correct);
-    incorrect.forEach((opt, i) => {
-        if (i === incorrect.length - 1) {
-            votes[opt] = remaining;
-        } else {
-            const portion = Math.floor(Math.random() * (remaining + 1));
-            votes[opt] = portion;
-            remaining -= portion;
-        }
-    });
-
-    const summary = options.map(opt => `${opt}: ${votes[opt]}%`).join('\n');
-    showMessageBox("Voto del Público", summary, [{ text: "Ok", className: "confirm" }]);
-}
+// Botones de Control
+startButton.onclick = startGame;
+nextButton.onclick = nextQuestion;
+restartButton.onclick = resetAll;
 
 function startGame() {
-    gameStarted = true;
-    startButton.style.display = "none";
+    askPlayerName((name) => {
+        playerName = name;
+        hasPlayerNameBeenSet = true;
+        updateLogo();
+        // Obtener preguntas aquí, antes de comenzar la ronda
+        fetchQuestionsAndStartRound();
+    });
+}
 
-    if (!hasPlayerNameBeenSet) {
-        setTimeout(() => {
-            gameLogoImage.style.display = "none";
-            askPlayerName(name => {
-                playerName = name;
-                hasPlayerNameBeenSet = true;
-                updateLogo();
-                startRound();
-            });
-        }, 1500);
+async function fetchQuestionsAndStartRound() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const questionsUrl = urlParams.get('preguntas');
+
+    if (questionsUrl) {
+        try {
+            showMessageBox("Cargando preguntas...", "Por favor espera mientras cargamos las preguntas desde la URL proporcionada.", []);
+            const response = await fetch(questionsUrl);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            questions = await response.json();
+            hideMessageBox(); // Ocultar mensaje de carga
+            startRound();
+        } catch (error) {
+            console.error("Error cargando preguntas desde la URL:", error);
+            showMessageBox("Error", "No se pudieron cargar las preguntas desde la URL. Asegúrate de que la URL sea correcta y el archivo JSON esté bien formado.", [
+                { text: "Reintentar", className: "confirm", onClick: startGame },
+                { text: "Cancelar", className: "cancel", onClick: () => { /* Manejar cancelación, quizás volver al estado inicial */ } }
+            ]);
+        }
     } else {
-        startRound();
+        // Mecanismo de respaldo si no se proporciona una URL. Podrías usar un conjunto predeterminado o un mensaje de error.
+        showMessageBox("Error", "No se ha proporcionado una URL para las preguntas. Por favor, usa el formato: ?preguntas=URL_DEL_GIST.JSON", [
+            { text: "Entendido", className: "confirm", onClick: () => { /* Quizás volver al estado inicial o mostrar preguntas por defecto */ } }
+        ]);
+        // Como medida temporal para el desarrollo, puedes reintroducir allAvailableQuestions aquí
+        // questions = allAvailableQuestions;
+        // startRound(); // Descomenta esto si quieres usar questions.js local como respaldo
     }
 }
 
+
 function startRound() {
-    const difficulty = difficultyMap[++gamesPlayedCount];
-    if (!difficulty) return;
-
-    const available = allAvailableQuestions
-        .map((q, i) => ({ q, i }))
-        .filter(({ q, i }) => q.difficulty === difficulty && !playedIndices.has(i));
-
-    if (available.length < QUESTIONS_PER_GAME || gamesPlayedCount > MAX_GAMES) {
-        showMessageBox("Juego finalizado", "Has completado todas las rondas.", [
-            { text: "Reiniciar todo", className: "confirm", onClick: resetAll }
-        ]);
-        return;
-    }
-
-    shuffleArray(available);
-    questions = available.slice(0, QUESTIONS_PER_GAME).map(({ q, i }) => {
-        playedIndices.add(i);
-        return q;
-    });
-
+    gameStarted = true;
     currentQuestionIndex = 0;
     score = 0;
-    used5050 = usedCall = usedAudience = false;
+    used5050 = false;
+    usedCall = false;
+    usedAudience = false;
+    gamesPlayedCount++;
 
+    // Restablecer el estado de los botones de línea de vida
+    lifeline5050Button.disabled = false;
+    lifelineCallButton.disabled = false;
+    lifelineAudienceButton.disabled = false;
+
+    shuffleArray(questions);
     generatePrizeLadder(prizeLadderElement);
     updatePrizeLadder(score, QUESTIONS_PER_GAME, prizeLadderElement);
-
-    document.getElementById('lifeline5050').disabled = false;
-    document.getElementById('lifelineCall').disabled = false;
-    document.getElementById('lifelineAudience').disabled = false;
-
     loadCurrentQuestion();
+
+    startButton.style.display = 'none';
+    restartButton.style.display = 'block';
+    nextButton.style.display = 'none';
+    gameLogoImage.style.display = "none";
 }
 
 function loadCurrentQuestion() {
-    const q = questions[currentQuestionIndex];
-    loadQuestion(q, currentQuestionIndex, optionsGrid, questionText, checkAnswer);
-    nextButton.style.display = "none";
+    const question = questions[currentQuestionIndex];
+    loadQuestion(question, currentQuestionIndex, optionsGrid, questionText, (selectedOption) => {
+        handleAnswer(question, selectedOption);
+    });
+    updatePrizeLadder(score, QUESTIONS_PER_GAME, prizeLadderElement);
 }
 
-function checkAnswer(selectedKey) {
-    const q = questions[currentQuestionIndex];
-    const isCorrect = selectedKey === q.correct;
+function handleAnswer(q, selectedOption) {
+    const optionButtons = optionsGrid.querySelectorAll('.option-button');
+    markAnswer(optionButtons, q.correct, selectedOption);
 
-    const buttons = optionsGrid.querySelectorAll('.option-button');
-    markAnswer(buttons, q.correct, selectedKey);
-
-    if (isCorrect) {
+    if (selectedOption === q.correct) {
         score++;
-        updatePrizeLadder(score, QUESTIONS_PER_GAME, prizeLadderElement);
-        showMessageBox("¡Correcto!", `Bien hecho, ${playerName}.`, [
+        showMessageBox("¡Correcto!", "¡Muy bien! Has acertado la pregunta.", [
             { text: "Siguiente", className: "confirm", onClick: nextQuestion }
         ]);
     } else {
@@ -231,14 +195,12 @@ function resetAll() {
 function updateLogo() {
     gameLogoImage.src = `https://placehold.co/300x100/000000/00FF00?text=${encodeURIComponent(playerName)}`;
     gameLogoImage.alt = `Nombre del jugador: ${playerName}`;
-    gameLogoImage.style.display = 'block';
 }
 
-startButton.onclick = startGame;
-nextButton.onclick = nextQuestion;
-restartButton.onclick = startRound;
-
-window.onload = () => {
-    generatePrizeLadder(prizeLadderElement);
-    questionText.textContent = "Haz clic en 'Empezar Juego' para comenzar.";
-};
+// Configuración inicial
+document.addEventListener('DOMContentLoaded', () => {
+    generatePrizeLadder(prizeLadderElement); // Generar una vez al cargar
+    if (!hasPlayerNameBeenSet) {
+        startGame();
+    }
+});
